@@ -75,98 +75,45 @@ export default function App() {
 
     setIsProcessing(true);
     setError(null);
+    console.log("Iniciando procesamiento de imagen vía servidor...");
 
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
-        throw new Error("Clave de API no configurada. Por favor, ve a 'Settings' -> 'Secrets' y añade tu GEMINI_API_KEY.");
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
-      
       const mimeTypeMatch = image.match(/^data:(.*);base64,/);
       const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : "image/jpeg";
-      const base64Data = image.split(',')[1];
 
-      const prompt = `
-        Analiza esta imagen de un reporte de obra.
-        Extrae la información de la tabla siguiendo este formato exacto:
-        
-        CAMPOS DE CABECERA:
-        - manzana: El valor de "MANZANA" (si aparece).
-        - contrato: El valor de "CONTRATO" (si aparece).
-
-        COLUMNAS DE LA TABLA:
-        1. actividad: Texto en la columna "ACTIVIDADES OBRA GRIS".
-        2. unidad: Texto en la columna "Unidad".
-        3. pu_promedio: Valor en la columna "P.U. Promedio".
-        4. c1 a c14: Valores en las columnas numeradas del 1 al 14.
-
-        REGLAS:
-        - Si una celda está vacía, usa "".
-        - Devuelve un objeto JSON con las llaves "manzana", "contrato" y "rows" (que es un array de los objetos de la tabla).
-      `;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-preview",
-        contents: {
-          parts: [
-            { text: prompt },
-            {
-              inlineData: {
-                mimeType: mimeType,
-                data: base64Data,
-              },
-            },
-          ],
+      const response = await fetch("/api/process-image", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              manzana: { type: Type.STRING },
-              contrato: { type: Type.STRING },
-              rows: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    actividad: { type: Type.STRING },
-                    unidad: { type: Type.STRING },
-                    pu_promedio: { type: Type.STRING },
-                    c1: { type: Type.STRING },
-                    c2: { type: Type.STRING },
-                    c3: { type: Type.STRING },
-                    c4: { type: Type.STRING },
-                    c5: { type: Type.STRING },
-                    c6: { type: Type.STRING },
-                    c7: { type: Type.STRING },
-                    c8: { type: Type.STRING },
-                    c9: { type: Type.STRING },
-                    c10: { type: Type.STRING },
-                    c11: { type: Type.STRING },
-                    c12: { type: Type.STRING },
-                    c13: { type: Type.STRING },
-                    c14: { type: Type.STRING },
-                  },
-                  required: ["actividad", "unidad", "pu_promedio"],
-                },
-              },
-            },
-            required: ["rows"],
-          },
-        },
+        body: JSON.stringify({
+          image,
+          mimeType,
+        }),
       });
 
-      const text = response.text;
-      if (!text) throw new Error("No se pudo leer la imagen.");
+      let result;
+      const responseText = await response.text();
+      
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        console.error("Error parsing JSON:", responseText);
+        throw new Error("El servidor devolvió una respuesta inválida. Por favor, intenta de nuevo.");
+      }
 
-      const result = JSON.parse(text) as ExtractionResult;
+      if (!response.ok) {
+        throw new Error(result.error || "Error al procesar la imagen en el servidor.");
+      }
+
+      if (!result.rows || result.rows.length === 0) {
+        throw new Error("No se detectaron filas en la tabla. Asegúrate de que la foto esté bien enfocada.");
+      }
+      
       setData(result);
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Error al procesar la imagen.");
+      console.error("Error en processImage:", err);
+      setError(err.message || "Error desconocido al procesar la imagen.");
     } finally {
       setIsProcessing(false);
     }
