@@ -15,7 +15,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Table as TableIcon,
-  RefreshCw
+  RefreshCw,
+  Camera
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -24,7 +25,7 @@ import { motion, AnimatePresence } from 'motion/react';
 interface TableRow {
   actividad: string;
   unidad: string;
-  precio: string | number;
+  pu_promedio: string | number;
   c1?: string;
   c2?: string;
   c3?: string;
@@ -39,19 +40,20 @@ interface TableRow {
   c12?: string;
   c13?: string;
   c14?: string;
-  observaciones?: string;
 }
 
-// --- Constants ---
-
-const GEMINI_MODEL = "gemini-3.1-flash-preview";
+interface ExtractionResult {
+  manzana: string;
+  contrato: string;
+  rows: TableRow[];
+}
 
 // --- Components ---
 
 export default function App() {
   const [image, setImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [data, setData] = useState<TableRow[] | null>(null);
+  const [data, setData] = useState<ExtractionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -75,78 +77,96 @@ export default function App() {
     setError(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
+        throw new Error("Clave de API no configurada. Por favor, ve a 'Settings' -> 'Secrets' y añade tu GEMINI_API_KEY.");
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
       
-      // Extract base64 data
+      const mimeTypeMatch = image.match(/^data:(.*);base64,/);
+      const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : "image/jpeg";
       const base64Data = image.split(',')[1];
 
       const prompt = `
-        Analiza esta imagen que contiene una tabla de seguimiento de obra.
-        Extrae la información y estructúrala en un formato JSON.
-        La tabla tiene las siguientes columnas principales:
-        - Actividad (Descripción de la tarea)
-        - Unidad (m2, m3, pza, etc.)
-        - Precio (Valor unitario)
-        - Columnas del 1 al 14 (Seguimiento numérico o marcas)
-        - Observaciones (Cualquier texto adicional al final de la fila)
+        Analiza esta imagen de un reporte de obra.
+        Extrae la información de la tabla siguiendo este formato exacto:
+        
+        CAMPOS DE CABECERA:
+        - manzana: El valor de "MANZANA" (si aparece).
+        - contrato: El valor de "CONTRATO" (si aparece).
 
-        Es muy importante que identifiques correctamente las filas, incluso si el texto es manuscrito.
-        Si una celda está vacía, usa una cadena vacía "".
-        Devuelve un array de objetos con las llaves: "actividad", "unidad", "precio", "c1", "c2", ..., "c14", "observaciones".
+        COLUMNAS DE LA TABLA:
+        1. actividad: Texto en la columna "ACTIVIDADES OBRA GRIS".
+        2. unidad: Texto en la columna "Unidad".
+        3. pu_promedio: Valor en la columna "P.U. Promedio".
+        4. c1 a c14: Valores en las columnas numeradas del 1 al 14.
+
+        REGLAS:
+        - Si una celda está vacía, usa "".
+        - Devuelve un objeto JSON con las llaves "manzana", "contrato" y "rows" (que es un array de los objetos de la tabla).
       `;
 
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: "image/jpeg",
-                  data: base64Data,
-                },
+        model: "gemini-3.1-flash-preview",
+        contents: {
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: base64Data,
               },
-            ],
-          },
-        ],
+            },
+          ],
+        },
         config: {
           responseMimeType: "application/json",
           responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                actividad: { type: Type.STRING },
-                unidad: { type: Type.STRING },
-                precio: { type: Type.STRING },
-                c1: { type: Type.STRING },
-                c2: { type: Type.STRING },
-                c3: { type: Type.STRING },
-                c4: { type: Type.STRING },
-                c5: { type: Type.STRING },
-                c6: { type: Type.STRING },
-                c7: { type: Type.STRING },
-                c8: { type: Type.STRING },
-                c9: { type: Type.STRING },
-                c10: { type: Type.STRING },
-                c11: { type: Type.STRING },
-                c12: { type: Type.STRING },
-                c13: { type: Type.STRING },
-                c14: { type: Type.STRING },
-                observaciones: { type: Type.STRING },
+            type: Type.OBJECT,
+            properties: {
+              manzana: { type: Type.STRING },
+              contrato: { type: Type.STRING },
+              rows: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    actividad: { type: Type.STRING },
+                    unidad: { type: Type.STRING },
+                    pu_promedio: { type: Type.STRING },
+                    c1: { type: Type.STRING },
+                    c2: { type: Type.STRING },
+                    c3: { type: Type.STRING },
+                    c4: { type: Type.STRING },
+                    c5: { type: Type.STRING },
+                    c6: { type: Type.STRING },
+                    c7: { type: Type.STRING },
+                    c8: { type: Type.STRING },
+                    c9: { type: Type.STRING },
+                    c10: { type: Type.STRING },
+                    c11: { type: Type.STRING },
+                    c12: { type: Type.STRING },
+                    c13: { type: Type.STRING },
+                    c14: { type: Type.STRING },
+                  },
+                  required: ["actividad", "unidad", "pu_promedio"],
+                },
               },
-              required: ["actividad", "unidad", "precio"],
             },
+            required: ["rows"],
           },
         },
       });
 
-      const result = JSON.parse(response.text || "[]");
+      const text = response.text;
+      if (!text) throw new Error("No se pudo leer la imagen.");
+
+      const result = JSON.parse(text) as ExtractionResult;
       setData(result);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError("Error al procesar la imagen. Asegúrate de que sea clara y contenga la tabla.");
+      setError(err.message || "Error al procesar la imagen.");
     } finally {
       setIsProcessing(false);
     }
@@ -155,59 +175,62 @@ export default function App() {
   const downloadExcel = () => {
     if (!data) return;
 
-    // Map data to have friendly headers
-    const exportData = data.map(row => ({
-      'Actividad': row.actividad,
+    const exportData = data.rows.map(row => ({
+      'ACTIVIDADES OBRA GRIS': row.actividad,
       'Unidad': row.unidad,
-      'Precio': row.precio,
-      '1': row.c1,
-      '2': row.c2,
-      '3': row.c3,
-      '4': row.c4,
-      '5': row.c5,
-      '6': row.c6,
-      '7': row.c7,
-      '8': row.c8,
-      '9': row.c9,
-      '10': row.c10,
-      '11': row.c11,
-      '12': row.c12,
-      '13': row.c13,
-      '14': row.c14,
-      'Observaciones': row.observaciones
+      'P.U. Promedio': row.pu_promedio,
+      '1': row.c1, '2': row.c2, '3': row.c3, '4': row.c4, '5': row.c5, '6': row.c6, '7': row.c7,
+      '8': row.c8, '9': row.c9, '10': row.c10, '11': row.c11, '12': row.c12, '13': row.c13, '14': row.c14
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
+    
+    // Add Manzana and Contrato info at the top if available
+    if (data.manzana || data.contrato) {
+      XLSX.utils.sheet_add_aoa(worksheet, [
+        ['MANZANA:', data.manzana || '', '', 'CONTRATO:', data.contrato || ''],
+        []
+      ], { origin: "A1" });
+      
+      // Shift existing data down
+      const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+      range.e.r += 2;
+      worksheet['!ref'] = XLSX.utils.encode_range(range);
+    }
+
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Reporte de Obra");
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Reporte");
     
     // Auto-size columns
-    const max_width = exportData.reduce((w, r) => Math.max(w, r.Actividad?.length || 0), 10);
-    worksheet['!cols'] = [{ wch: max_width + 5 }];
+    worksheet['!cols'] = [
+      { wch: 40 }, { wch: 10 }, { wch: 15 },
+      ...Array(14).fill({ wch: 4 })
+    ];
 
     XLSX.writeFile(workbook, "reporte_obra_final.xlsx");
   };
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans p-4 md:p-8">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-              <FileSpreadsheet className="text-emerald-600" size={32} />
-              Foto a Excel <span className="text-emerald-600">Pro</span>
-            </h1>
-            <p className="text-gray-500 mt-1">Transforma tus reportes de obra manuscritos en segundos.</p>
+    <div className="min-h-screen bg-gray-50 text-slate-900 font-sans p-4 md:p-8">
+      <div className="max-w-7xl mx-auto">
+        <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <div className="bg-emerald-600 p-3 rounded-2xl shadow-lg shadow-emerald-200">
+              <FileSpreadsheet className="text-white" size={32} />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Obra a Excel</h1>
+              <p className="text-slate-500 text-sm">Formato oficial de seguimiento de obra gris</p>
+            </div>
           </div>
           
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             <button 
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 bg-white border border-gray-200 px-4 py-2 rounded-xl shadow-sm hover:bg-gray-50 transition-all font-medium"
+              className="flex items-center gap-2 bg-white border border-slate-200 px-5 py-2.5 rounded-xl shadow-sm hover:bg-slate-50 transition-all font-semibold text-sm"
             >
-              <ImageIcon size={18} />
-              Cambiar Imagen
+              <Camera size={18} />
+              Subir Foto
             </button>
             <input 
               type="file" 
@@ -219,163 +242,133 @@ export default function App() {
           </div>
         </header>
 
-        <main className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Left Column: Upload & Preview Image */}
-          <div className="lg:col-span-5 space-y-6">
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="p-4 border-bottom border-gray-50 bg-gray-50/50 flex justify-between items-center">
-                <span className="text-sm font-semibold uppercase tracking-wider text-gray-400">Imagen de Origen</span>
-                {image && <CheckCircle2 size={16} className="text-emerald-500" />}
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+          {/* Preview Panel */}
+          <div className="xl:col-span-4 space-y-6">
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+              <div className="p-5 border-b border-slate-50 flex items-center justify-between">
+                <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">Imagen Original</h2>
+                {image && <CheckCircle2 size={18} className="text-emerald-500" />}
               </div>
               
-              <div className="aspect-[4/3] relative bg-gray-100 flex items-center justify-center">
+              <div className="aspect-square bg-slate-50 flex items-center justify-center relative group">
                 {image ? (
-                  <img 
-                    src={image} 
-                    alt="Preview" 
-                    className="w-full h-full object-contain"
-                    referrerPolicy="no-referrer"
-                  />
+                  <img src={image} alt="Preview" className="w-full h-full object-contain p-2" referrerPolicy="no-referrer" />
                 ) : (
-                  <div 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex flex-col items-center gap-4 cursor-pointer p-8 text-center"
-                  >
-                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-md text-emerald-600">
-                      <Upload size={32} />
-                    </div>
-                    <div>
-                      <p className="font-semibold text-lg">Sube una foto de tu reporte</p>
-                      <p className="text-gray-400 text-sm">JPG, PNG o JPEG</p>
-                    </div>
+                  <div onClick={() => fileInputRef.current?.click()} className="cursor-pointer flex flex-col items-center text-slate-300 hover:text-emerald-400 transition-colors">
+                    <ImageIcon size={64} strokeWidth={1} />
+                    <p className="mt-4 font-medium">Selecciona una imagen</p>
                   </div>
                 )}
               </div>
 
               {image && !data && !isProcessing && (
-                <div className="p-4">
+                <div className="p-5">
                   <button 
                     onClick={processImage}
-                    className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 flex items-center justify-center gap-2"
+                    className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 flex items-center justify-center gap-3"
                   >
-                    <RefreshCw size={20} />
-                    Procesar con IA
+                    <RefreshCw size={20} className={isProcessing ? "animate-spin" : ""} />
+                    Acomodar Datos
                   </button>
                 </div>
               )}
             </div>
 
             {error && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-red-50 border border-red-100 p-4 rounded-xl flex items-start gap-3 text-red-700"
-              >
-                <AlertCircle className="shrink-0 mt-0.5" size={20} />
-                <p className="text-sm">{error}</p>
-              </motion.div>
+              <div className="bg-red-50 border border-red-100 p-5 rounded-3xl flex items-start gap-4 text-red-700">
+                <AlertCircle className="shrink-0 mt-1" size={20} />
+                <p className="text-sm font-medium leading-relaxed">{error}</p>
+              </div>
             )}
           </div>
 
-          {/* Right Column: Data Preview & Export */}
-          <div className="lg:col-span-7 space-y-6">
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 min-h-[400px] flex flex-col">
-              <div className="p-4 border-b border-gray-50 bg-gray-50/50 flex justify-between items-center">
-                <span className="text-sm font-semibold uppercase tracking-wider text-gray-400">Vista Previa Estructurada</span>
+          {/* Result Panel */}
+          <div className="xl:col-span-8 space-y-6">
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden flex flex-col min-h-[600px]">
+              <div className="p-5 border-b border-slate-50 flex items-center justify-between bg-white sticky top-0 z-20">
+                <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">Vista Previa del Formato</h2>
                 {data && (
                   <button 
                     onClick={downloadExcel}
-                    className="flex items-center gap-2 text-emerald-600 font-bold text-sm hover:underline"
+                    className="flex items-center gap-2 bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl font-bold text-sm hover:bg-emerald-100 transition-colors"
                   >
                     <Download size={16} />
-                    Descargar Excel
+                    Exportar Excel
                   </button>
                 )}
               </div>
 
-              <div className="flex-1 overflow-auto p-0 relative">
+              <div className="flex-1 overflow-auto relative">
                 <AnimatePresence mode="wait">
                   {isProcessing ? (
                     <motion.div 
-                      key="loading"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm z-10"
+                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                      className="absolute inset-0 flex flex-col items-center justify-center bg-white/90 backdrop-blur-sm z-30"
                     >
-                      <Loader2 className="animate-spin text-emerald-600 mb-4" size={48} />
-                      <p className="font-medium text-gray-600">Analizando estructura de tabla...</p>
-                      <p className="text-xs text-gray-400 mt-1">Esto puede tardar unos segundos</p>
+                      <Loader2 className="animate-spin text-emerald-600 mb-6" size={48} />
+                      <p className="font-bold text-slate-800 text-lg">Acomodando celdas...</p>
+                      <p className="text-slate-400 text-sm mt-2">Estamos organizando la información en el formato correcto</p>
                     </motion.div>
                   ) : data ? (
-                    <motion.div 
-                      key="table"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="min-w-full"
-                    >
-                      <table className="w-full text-left border-collapse">
-                        <thead className="sticky top-0 bg-gray-50 text-[10px] uppercase font-bold text-gray-400 border-b border-gray-100">
-                          <tr>
-                            <th className="px-4 py-3 min-w-[200px]">Actividad</th>
-                            <th className="px-2 py-3">Und</th>
-                            <th className="px-2 py-3">Precio</th>
-                            {[...Array(14)].map((_, i) => (
-                              <th key={i} className="px-1 py-3 text-center w-8">{i + 1}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="text-xs divide-y divide-gray-50">
-                          {data.map((row, idx) => (
-                            <tr key={idx} className="hover:bg-emerald-50/30 transition-colors">
-                              <td className="px-4 py-3 font-medium text-gray-700">{row.actividad}</td>
-                              <td className="px-2 py-3 text-gray-500">{row.unidad}</td>
-                              <td className="px-2 py-3 text-gray-500">{row.precio}</td>
-                              {[...Array(14)].map((_, i) => {
-                                const key = `c${i + 1}` as keyof TableRow;
-                                return (
-                                  <td key={i} className="px-1 py-3 text-center text-gray-400">
-                                    {row[key] || "-"}
-                                  </td>
-                                );
-                              })}
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-0">
+                      {/* Header Info */}
+                      <div className="p-6 bg-slate-50/50 border-b border-slate-100 flex gap-12">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Manzana</span>
+                          <span className="font-bold text-slate-900">{data.manzana || "---"}</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Contrato</span>
+                          <span className="font-bold text-slate-900">{data.contrato || "---"}</span>
+                        </div>
+                      </div>
+
+                      {/* Table */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead className="bg-white text-[10px] font-black text-slate-400 uppercase tracking-tighter border-b border-slate-100">
+                            <tr>
+                              <th className="px-6 py-4 min-w-[300px] border-r border-slate-50">Actividades Obra Gris</th>
+                              <th className="px-4 py-4 border-r border-slate-50">Unidad</th>
+                              <th className="px-4 py-4 border-r border-slate-50">P.U. Promedio</th>
+                              {[...Array(14)].map((_, i) => (
+                                <th key={i} className="px-2 py-4 text-center w-10 border-r border-slate-50">{i + 1}</th>
+                              ))}
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="text-[11px] font-medium divide-y divide-slate-50">
+                            {data.rows.map((row, idx) => (
+                              <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="px-6 py-3 font-bold text-slate-700 border-r border-slate-50">{row.actividad}</td>
+                                <td className="px-4 py-3 text-slate-500 border-r border-slate-50">{row.unidad}</td>
+                                <td className="px-4 py-3 text-slate-500 border-r border-slate-50">{row.pu_promedio}</td>
+                                {[...Array(14)].map((_, i) => {
+                                  const key = `c${i + 1}` as keyof TableRow;
+                                  return (
+                                    <td key={i} className="px-2 py-3 text-center text-slate-400 border-r border-slate-50">
+                                      {row[key] || ""}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </motion.div>
                   ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-gray-300 p-12 text-center">
-                      <TableIcon size={64} className="mb-4 opacity-20" />
-                      <p className="max-w-xs">Sube una imagen y presiona "Procesar" para ver los datos aquí.</p>
+                    <div className="h-full flex flex-col items-center justify-center text-slate-200 p-20 text-center">
+                      <TableIcon size={80} strokeWidth={1} className="mb-6 opacity-40" />
+                      <h3 className="text-xl font-bold text-slate-300">Formato Vacío</h3>
+                      <p className="max-w-xs text-slate-400 mt-2 text-sm">Sube la foto de tu reporte para generar automáticamente la tabla estructurada.</p>
                     </div>
                   )}
                 </AnimatePresence>
               </div>
             </div>
-
-            {data && (
-              <div className="bg-emerald-600 rounded-2xl p-6 text-white shadow-xl shadow-emerald-100 flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-bold">¡Listo para exportar!</h3>
-                  <p className="text-emerald-100 text-sm">Se han detectado {data.length} filas con éxito.</p>
-                </div>
-                <button 
-                  onClick={downloadExcel}
-                  className="bg-white text-emerald-600 px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-emerald-50 transition-all"
-                >
-                  <Download size={20} />
-                  Descargar .XLSX
-                </button>
-              </div>
-            )}
           </div>
-        </main>
-
-        {/* Footer Info */}
-        <footer className="mt-12 pt-8 border-t border-gray-100 text-center text-gray-400 text-sm">
-          <p>© 2026 Foto a Excel Pro - Desarrollado con Inteligencia Artificial</p>
-        </footer>
+        </div>
       </div>
     </div>
   );
