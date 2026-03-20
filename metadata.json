@@ -1,0 +1,7 @@
+{
+  "name": "Foto a Excel Pro",
+  "description": "Convierte fotos de tablas de obra en archivos de Excel estructurados usando IA.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
